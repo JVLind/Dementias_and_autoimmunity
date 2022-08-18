@@ -1,0 +1,675 @@
+########################################################################################################################
+# Immune system and blood-brain barrier-wide biomarker analyses provide
+# causal evidence for autoimmunity in dementia-causing diseases
+# Lindbohm et al 2022
+########################################################################################################################
+
+
+##############################################
+# MR analyses using MR-base                  #
+##############################################
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(Hmisc)
+
+library(devtools)
+library(TwoSampleMR)
+library(MRInstruments)
+
+
+#####################################################################################
+
+#  Part 1 run analysis between dementia risk factors and immune system components  #
+
+####################################################################################
+
+
+#---------------- STEP1, get exposures ---------------------------------------------#
+
+ao<-available_outcomes()
+
+setwd("path")
+
+
+immuno_exposure = c("cytokine", "interferon", "interleukin", "IL-", "chemokin", "complemen", "tumor necrosis", "TNF", "Tumor necrosis factor", "TGF", "Transforming growth",
+                    "ccr", "ccl", "cx", "cd1","cd2","c31","cd4","cd5","cd6","cd7","cd8","cd9", "MHC", "hla", "LTB", "leukotrien", "globulin", "lps", "mcp-", "PLVAP",
+                    "VLA", "TM4SF", "shh", "sonic hedge", "Ptch", "ceramid", "sphingo", "fingolimod", "retinoic", "caspase", "phospholipas", "arachi", "chemoat", "chemota",
+                    "lipoxyge", "cox-1", "cox-2", "prostaglandin", "prostacyc", "thromboxan", "treg",
+                    "IgG", "IgA", "IgM", "IgE", "IgD",
+                    "b cell", "basophil", "T cell", "Dendritic", "Eosinophil", "Macrophage", "Mast cell", "natural killer", "leuko",
+                    "helper cell", "th17 cell", "lymphocyte", "plasma cell", "monocyte", "platelet","red blood", "erythrocyte")
+
+
+exposure_gwas <- subset(ao, grepl(regex(paste(immuno_exposure, collapse = "|"), ignore_case = T), trait, ignore.case=T) | grepl(regex(paste(immuno_exposure, collapse = "|"), ignore_case = T), note, ignore.case=T))
+
+
+remove = c("Astigmatism", "Attempted fluid intelligence", "Benign neoplasm", "Cancer code", "Cancer of digestive organs", "Cancer/testis antigen 55",
+           "Cigarettes", "Diagnoses", "Ever had prostate", "intelligence", "Functional digestive", "Malignant neoplasm", "Operation code",
+           "Operative procedures", "Other and unspesified", "Other diseases", "smoked", "smoking", "tobacco", "physical activity", "Ulcerative rectosigmoiditis",
+           "Diagnoses", "inflammatory bowl", "Type of cancer", "cause of death", "Carcinoma in situ", "Haemangioma", "Female infertility", "Follicular lymphoma",
+           "General examination", "Giant cell arteritis", "Gonarthrosis,primary", "In situ neoplasms", "Job coding", "Leiomyoma of uterus",
+           "Persons encountering", "Time from waking", "Hypertension", "Lymphangioma", "Autoimmune thyroiditis", "Bacterial infection", "Errors before",
+           "Gut microbiota abundance", "Hypertensive", "Hypodontia", "FAST ROIs", "Other", "Traction detachment of retina", "Treatment/medication",
+           "Trigger finger", "Job SOC coding", "Diseases of the digestive system", "Fibroblastic disorders")
+
+exposure_gwas <- exposure_gwas[!grepl(paste(remove, collapse = "|"), ignore.case = T, exposure_gwas$trait),]
+exposure_gwas <- exposure_gwas[!grepl(paste(remove, collapse = "|"), ignore.case = T, exposure_gwas$note),]
+
+ancestry = c("European")
+exposure_gwas = exposure_gwas %>% filter(population %in% ancestry)
+
+exposure_gwas <- subset(exposure_gwas, grepl(regex(paste(ancestry, collapse = "|"), ignore_case = T), population, ignore.case=T))
+
+list_exposure_gwas = exposure_gwas %>% pull(id)
+list_exposure_gwas = unique(list_exposure_gwas)
+list_exposure_gwas %>% unique(list_exposure_gwas) %>% length()
+
+exposure_gwas <- extract_instruments(outcomes= c(list_exposure_gwas))
+
+#---------------- STEP2, prune exposure data ---------------------------------------------#
+
+
+exposure_data = exposure_gwas
+exposure_data<-clump_data(exposure_data, clump_r2 = 0.05, clump_kb = 500, pop="EUR")
+
+#---------------- STEP3, get outcome data ---------------------------------------------#
+
+
+
+
+dementia_outcome = c("finn-a-AD_LO", "finn-a-AD", "ieu-a-297", "finn-a-AD_LO_EXMORE", "finn-a-AD_EXMORE", "finn-a-G6_ALZHEIMER","ieu-a-298", "ebi-a-GCST002245",
+                     
+                     "finn-a-F5_ALZHDEMENT", "finn-a-G6_ALZHEIMER_EXMORE", "ieu-b-2", "ieu-a-824", "finn-a-AD_EO", "finn-a-AD_AM", "finn-a-AD_EO_EXMORE",
+                     
+                     "finn-a-AD_AM_EXMORE", "finn-a-F5_ALZHDEMENT", "finn-a-F5_DEMENTIA", "finn-a-F5_VASCDEM", "ieu-b-43", "ebi-a-GCST006572", "ieu-b-7"
+)
+
+
+outcome_gwas = ao %>% filter(id %in% dementia_outcome)
+
+# Make sure that only europeans are included
+
+ancestry = c("European")
+outcome_gwas = outcome_gwas %>% filter(population %in% ancestry)
+
+list_outcome_gwas = outcome_gwas %>% pull(id)
+list_outcome_gwas = unique(list_outcome_gwas)
+
+outcome_data <- extract_outcome_data(
+  snps = exposure_data$SNP, outcomes = list_outcome_gwas, proxies = T, rsq = 0.6, proxy_splitsize = 500)
+
+
+#---------------- STEP4, harmonize exposure and outcome data ---------------------------------------------#
+
+
+H_data <- harmonise_data(
+  exposure_dat = exposure_data,
+  outcome_dat = outcome_data,
+  action = 2
+)
+
+
+#---------------- STEP5, power prune data ---------------------------------------------#
+
+H_data<-power_prune(H_data, method=1, dist.outcome="binary")
+
+
+#---------------- STEP6 run MR ---------------------------------------------#
+
+mr_results<-mr(H_data,
+               method_list=c("mr_wald_ratio", "mr_ivw", "mr_egger_regression", "mr_weighted_median", "mr_weighted_mode"))
+
+#Get ORs
+mr_results_dem_protein = generate_odds_ratios(mr_results)
+
+mr_results_dem_protein = as.data.frame(mr_results_dem_protein)
+
+setwd("path")
+
+list_of_datasets <- list("Harmonized_data" = H_data,
+                         "MR_results" = mr_results_dem_protein)
+write.xlsx(list_of_datasets, file = paste0("MR_results_immuno.xlsx"), overwrite = T)
+
+
+
+
+
+
+
+########################################################################
+
+# Part 2 run analysis between dementia risk factors and BBB components #
+
+########################################################################
+
+
+#---------------- STEP1, get exposures ---------------------------------------------#
+
+ao<-available_outcomes()
+
+setwd("path")
+
+#Initial search using:
+BBB_exposure = c("endot", "angio", "tunica", "membrane", "permea", "fibroblas", "Fibronectin", "astrocyte", "pericyte", 
+                 "glia", "neuron", "plasma membrane",  "collagen",
+                 "Junctional adhesion", "Tight junction", "Gap junction",  
+                 "cadherin", "cdh", "occludin", "ocln", "claudin", "Cldn", "junction", "ZO-", "zonula", "MYZAP", "cytoske",
+                 "adhesion", "JAM-", "catenin", "CTNNA", "cingulin", "CGN", "actin", "connexin", "cx", "gja", "gjb", "gjc",
+                 "desmo", "tetraspa", "vinculin", "vcl", "lamin", "integrin", "adam", "nidog", "dystrogl", "nid1", "dag1",
+                 "fibrillin", "perlecan", "heparan sulfate", "fbn", "hspg", "ndst", "selectin", "selp", "sele", "sell",
+                 "proteogly", "glycoprote", "glycosamino", "syndecan", "sdc", "hyalur", "heparan sul", 
+                 "vegf", "elastas", "proteinase", "matrix","mmp", "adam", "timp", "thrombin", "tryptase", "tps", "cathepsi",
+                 "matrix", "plasmin", "PDGF", "platelet derived", "tie-2", "tgf", "Transforming growth factor", "tnf", "Tumor necrosis factor",
+                 "Tissue-type plasminogen", "GDNF", "thrombomodulin", "Leukemia inhibitory factor", "Willebrand", "neutrophil chemoattractant", 
+                 "CINC", "GRO-","MCAO", "fibrinog", "chymase", "histamin", "FGF", "SDF1", "Ang1", "BDNF", "Flk1", "EBA", "leukotrien", "NFkB", 
+                 "nuclear factor kappa", "ap-1", "prostacyclin", "adenosine", "nitric oxi", "nitroprusside", "PGI", "NADPH", "hocl", "peroxidase",
+                 "gelatinase", "macroglobulin", "trypsin", "RANTES", "GPIIb", "IIIa", "SELPLG", "GPIba", "mac-1", "GPIbα", "urokinase", 
+                 "coagulation", "Activated Protein C", "K-dependent protein C", "protein s100", "Vitamin K-dependent protein S", "vWF", "pai-1",
+                 "transporter", "Vesicle transport", "transporting", "transport protein", "channel", "exchanger", "lrp", "sLeptin R", "smit",
+                 "sglt", "lrp", "atp", "gtp", "solute carrier", "Transferrin receptor", "LIPOPROTEIN RECEPTOR", "clathrin",  "Notch-3",
+                 "PDGF-BB", "PDGF Rb",  "cyclophilin", "semaphorin",  "wnt", "neuropilin", "robo", "icam-", "catenin", "podo",
+                 "cam-", "camk", "monocarboxylate trans", "SLC16a1", "glutamate", "pregnane", "pxr", "receptor", "androstane", "Bcrp", "AhR",
+                 "Multidrug", "glucuronide", "Ornithine aminotransferase", "riip", "IGF1R", "Protein kinase b", "Breast cancer resistance protein",
+                 "CFTR", "EP-1", "FXR", "gsk", "jnk", "lxr", "pbc", "pcn", "pcr", "pi-3", "pk", "pten", "vdr", "s1p", "nmda",
+                 "mtx", "flk", "src", "NKeff:%Kir+", "Sodium-dependent", "Serotonin N-acetyltra", "snat", "asct", "hmit", "glut1", "taut", "glyt",
+                 "eaat", "slc", "Cerebral cavernous malformations 2 pr", "htra")
+
+
+# No relevant hits for "astrocy",  "pericy", "occludin", "claudin", "angulin", "actin", "basement", "basal", "symporter", "v1", "MRP", "ABC",
+# "rage", "ctl", "oatp", "oct", "fatp", "mfsd", "mct", "cat", "snat", "asct", "hmit", "glut1", "taut", "glyt", "eaat", "slc", 
+# "endocytos", "exocytos", "sodium pump", "potassium pump", "htra", "ccm", "col4", "xpr", "jam3", "perlecan", "shh", "hedeghog",
+# ""aquaporin", "serine peptid", "par1" 
+
+BBB_exposure = c("Tight junction")
+
+exposure_gwas <- subset(ao, grepl(regex(paste(BBB_exposure, collapse = "|"), ignore_case = T), trait, ignore.case=T) | grepl(regex(paste(BBB_exposure, collapse = "|"), ignore_case = T), note, ignore.case=T))
+
+remove = c("Astigmatism", "Attempted fluid intelligence", "Benign neoplasm", "Cancer code", "Cancer of digestive organs", "Cancer/testis antigen 55",
+           "Cigarettes", "Diagnoses", "Ever had prostate", "intelligence", "Functional digestive", "Malignant neoplasm", "Operation code",
+           "Operative procedures", "Other and unspesified", "Other diseases", "smoked", "smoking", "tobacco", "physical activity", "Ulcerative rectosigmoiditis",
+           "Diagnoses", "inflammatory bowl", "Type of cancer", "cause of death", "Carcinoma in situ", "Haemangioma", "Female infertility", "Follicular lymphoma",
+           "General examination", "Giant cell arteritis", "Gonarthrosis,primary", "In situ neoplasms", "Job coding", "Leiomyoma of uterus",
+           "Persons encountering", "Time from waking", "Hypertension", "Lymphangioma", "Autoimmune thyroiditis", "Bacterial infection", "Errors before",
+           "Gut microbiota abundance", "Hypertensive", "Hypodontia", "FAST ROIs", "Other", "Traction detachment of retina", "Treatment/medication",
+           "insulin", "prolactin", "keratosis", "Intestinal adhesions", "pelvic adhesion surgery", "Operative procedures", "Benign neoplasm:",
+           "Diseases of the myoneural", "Diagnoses", "PCT where patients GP", "Operation code:", "Activities undertaken", "Errors before selecting",
+           "Mineral and other", "Mineral and other", "Selective serotonin", "Selenide", "selenium", "Vestibular neuronitis", "Coronary", "Diagnoses",
+           "Haemangioma", "Lymphangioleiomyomatosis", "Bombesin", "immunoglobulin", "Interleukin", "Interferon", "Macrophage", "Alcohol abuse",
+           "Alzheimer", "Cerebral atherosclerosis", "Chondrocostal junction syndrome", "Trigger finger", "Job SOC coding",
+           "Diseases of the digestive system", "Fibroblastic disorders")
+
+exposure_gwas <- exposure_gwas[!grepl(paste(remove, collapse = "|"), ignore.case = T, exposure_gwas$trait),]
+exposure_gwas <- exposure_gwas[!grepl(paste(remove, collapse = "|"), ignore.case = T, exposure_gwas$note),]
+
+
+ancestry = c("European")
+exposure_gwas = exposure_gwas %>% filter(population %in% ancestry)
+
+exposure_gwas <- subset(exposure_gwas, grepl(regex(paste(ancestry, collapse = "|"), ignore_case = T), population, ignore.case=T))
+
+list_exposure_gwas = exposure_gwas %>% pull(id)
+list_exposure_gwas = unique(list_exposure_gwas)
+list_exposure_gwas %>% unique(list_exposure_gwas) %>% length()
+
+
+exposure_gwas <- extract_instruments(outcomes= c(list_exposure_gwas))
+
+#---------------- STEP2, prune exposure data ---------------------------------------------#
+
+
+exposure_data = exposure_gwas
+exposure_data<-clump_data(exposure_data, clump_r2 = 0.05, clump_kb = 500, pop="EUR")
+
+#---------------- STEP3, get outcome data ---------------------------------------------#
+
+
+
+
+dementia_outcome = c("finn-a-AD_LO", "finn-a-AD", "ieu-a-297", "finn-a-AD_LO_EXMORE", "finn-a-AD_EXMORE", "finn-a-G6_ALZHEIMER","ieu-a-298", "ebi-a-GCST002245",
+                     
+                     "finn-a-F5_ALZHDEMENT", "finn-a-G6_ALZHEIMER_EXMORE", "ieu-b-2", "ieu-a-824", "finn-a-AD_EO", "finn-a-AD_AM", "finn-a-AD_EO_EXMORE",
+                     
+                     "finn-a-AD_AM_EXMORE", "finn-a-F5_ALZHDEMENT", "finn-a-F5_DEMENTIA", "finn-a-F5_VASCDEM", "ieu-b-43", "ebi-a-GCST006572", "ieu-b-7"
+)
+
+
+
+outcome_gwas = ao %>% filter(id %in% dementia_outcome)
+
+# Make sure that only europeans are included
+
+ancestry = c("European")
+outcome_gwas = outcome_gwas %>% filter(population %in% ancestry)
+
+list_outcome_gwas = outcome_gwas %>% pull(id)
+length(list_outcome_gwas)
+list_outcome_gwas = unique(list_outcome_gwas)
+
+outcome_data <- extract_outcome_data(
+  snps = exposure_data$SNP, outcomes = list_outcome_gwas, proxies = T, rsq = 0.6, proxy_splitsize = 500)
+
+#---------------- STEP4, harmonize exposure and outcome data ---------------------------------------------#
+
+
+H_data <- harmonise_data(
+  exposure_dat = exposure_data,
+  outcome_dat = outcome_data,
+  action = 2
+)
+
+
+#---------------- STEP5, power prune data ---------------------------------------------#
+
+H_data<-power_prune(H_data, method=1, dist.outcome="binary")
+
+
+#---------------- STEP6 run MR ---------------------------------------------#
+
+mr_results<-mr(H_data,
+               method_list=c("mr_wald_ratio", "mr_ivw", "mr_egger_regression", "mr_weighted_median", "mr_weighted_mode"))
+
+#Get ORs
+mr_results_dem_protein = generate_odds_ratios(mr_results)
+
+mr_results_dem_protein = as.data.frame(mr_results_dem_protein)
+
+setwd("path")
+
+list_of_datasets <- list("Harmonized_data" = H_data,
+                         "MR_results" = mr_results_dem_protein)
+write.xlsx(list_of_datasets, file = paste0("MR_results_BBB.xlsx"), overwrite = T)
+
+
+
+
+
+
+
+
+
+########################################################################################################################
+
+##############################################
+# Plasma proteomics analyses in Whitehall II #
+##############################################
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(Hmisc)
+
+
+### Unadjusted model
+
+setwd("path")
+whii_dem_data = read.dta("Whitehall_II_dem_data.dta")
+
+
+id_list = read_excel(paste0("path/8_dementia_protein_ids.xlsx"))
+
+dem_seqid_list = id_list %>% pull(seq_id)
+
+res = matrix(NA, ncol = 5, nrow = length(seq_id))
+head(res);dim(res)
+res[,1] = seq_id
+res
+
+
+for(ii in 1:length(dem_seqid_list)) {
+  
+  res.cox = coxph(Surv(fu_dem_5_2019, inc_dem_5_2019) ~ age_s5+sex+get(res[ii,1])+soma_batch, data = whii_dem_data %>% select(soma_batch, age_s5, sex, fu_dem_5_2019, inc_dem_5_2019, c(dem_seqid_list)))
+  res[ii,2] = as.numeric(summary(res.cox)$coef[3,1])
+  res[ii,3] = summary(res.cox)$coef[3,2]
+  res[ii,4] = summary(res.cox)$coef[3,3]
+  res[ii,5] = summary(res.cox)$coef[3,5]
+  
+}
+
+res_age_sex = res
+res_age_sex = as.data.table(res_age_sex)
+names(res_age_sex) = c("var", "beta", "se", "teststat", "pval")
+res_age_sex
+
+setwd("path")
+write.xlsx(res_age_sex, file = paste0("Age_sex_adj_results.xlsx"), overwrite = T)
+
+
+
+### Adjusted model
+
+res = matrix(NA, ncol = 5, nrow = length(seq_id))
+head(res);dim(res)
+res[,1] = seq_id
+res
+
+for(ii in 1:length(dem_seqid_list)) {
+  
+  res.cox = coxph(Surv(fu_dem_5_2019, inc_dem_5_2019) ~ age_s5+sex+get(res[ii,1])+soma_batch+apoe_bin, data = whii_dem_data %>% select(soma_batch, age_s5, sex, fu_dem_5_2019, inc_dem_5_2019, c(dem_seqid_list)))
+  res[ii,2] = as.numeric(summary(res.cox)$coef[3,1])
+  res[ii,3] = summary(res.cox)$coef[3,2]
+  res[ii,4] = summary(res.cox)$coef[3,3]
+  res[ii,5] = summary(res.cox)$coef[3,5]
+  
+}
+
+res_age_sex_apoe = res
+res_age_sex_apoe = as.data.table(res_age_sex_apoe)
+names(res_age_sex_apoe) = c("var", "beta", "se", "teststat", "pval")
+res_age_sex_apoe
+
+write.xlsx(res_age_sex_apoe, file = paste0("Age_sex_apoe_adj_results.xlsx"), overwrite = T)
+
+
+
+
+
+
+########################################################################################################################
+
+
+
+###################################
+# PRS analyses                   #
+###################################
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(Hmisc)
+
+
+data = fread(input = paste0("/path/FinnGen_PRS_analysis_file.txt")) 
+
+sex_outcomes = fread(input = paste0("/path/FinnGen_sex_specific_outcomes.txt"))  
+
+all_outcomes = fread(input = paste0("/path/FinnGen_outcomes.txt"))  
+
+
+results_all = c()
+
+for(disease in all_outcomes)  {
+  
+  data$endpoint = data[,get(disease)]
+  
+  if(disease %in% c(sex_outcomes)) {
+    paste0("")
+  } else {
+    data$endpoint[is.na(data$endpoint)] = 0
+  }
+  
+  if(disease %in% sex_outcomes) {
+    form = formula(paste0("endpoint ~ prs_z + ", covs))
+  } else {
+    form = formula(paste0("endpoint ~ prs_z + SEX + ", covs))
+  }
+  
+  form = formula(paste0("endpoint ~ prs_z +", covs))
+  fit = glm(form, data = data, family = "binomial")
+  summary(fit)
+  
+  result <- as.data.frame(t(matrix(c(disease,
+                                     summary(fit)$coefficients[2,1],
+                                     summary(fit)$coefficients[2,2],
+                                     summary(fit)$coefficients[2,3],
+                                     summary(fit)$coefficients[2,4],
+                                     exp(coefficients(fit)[2]),
+                                     exp(coefficients(fit)[2] - 1.96*summary(fit)$coefficients[2,2]),
+                                     exp(coefficients(fit)[2] + 1.96*summary(fit)$coefficients[2,2]) ))))
+  
+  results_all = rbind(results_all, result)
+  print(results_all)
+  
+  data$endpoint = NULL
+  
+}
+
+
+col_names <- c("disease", "beta", "se", "z",  "pval", "or", "ci_lower", "ci_upper")
+names(result_all) <- col_names
+
+write.xlsx(result_all, file = "FinnGen_PRS_results.xlsx", overwrite = T)
+
+
+
+
+########################################################################################################################
+
+
+
+###################################
+# HLA analyses                   #
+###################################
+
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(Hmisc)
+
+setwd("path")
+
+endpoints = read_xlsx("FinnGen_endpoint_data", col_names = F) %>% pull(1)
+data = fread(input = "FinnGen_data.zcat")
+cov = fread(input = "FinnGen_covariates.zcat")
+pc = fread("FinnGen_PC_data", select = c(2:12))
+data = data %>% left_join(cov) %>% left_join(pc)
+
+types = c("A", "B", "C", "DQA1", "DQB1", "DRB1", "DRB3", "DRB4", "DRB5", "DPB1")
+
+result_all = c()
+
+for(type in types) {
+  
+  print(paste0("Starting: HLA-", type))
+  
+  hladata = fread(paste0("R8_", type, "_imputed.tsv"))
+  alleles = unique(c(hladata$allele1, hladata$allele2)) 
+  alleles = alleles[nchar(alleles) == 5]
+  
+  hla_allelesover0.01 = c()
+  
+  for(allele in alleles) {
+    
+    temp = merge(data, hladata[,c("sample.id", "allele1", "allele2", "prob")], by.x = "FINNGENID", by.y = "sample.id")
+    temp$hla = ifelse(temp$allele1 == allele | temp$allele2 == allele, 1, 0)
+    temp$hla[temp$prob < 0.6] = NA
+    
+    if(prop.table(table(temp$hla))[2] >= 0.01 & prop.table(table(temp$hla))[1] != 1) {
+      hla_allelesover0.01 = c(hla_allelesover0.01, allele)
+    }
+    
+    rm(temp)
+    
+    hla_allelesover0.01 = hla_allelesover0.01[hla_allelesover0.01 != "ng"]
+    hla_allelesover0.01 = hla_allelesover0.01[!is.na(hla_allelesover0.01)]
+    
+  }
+  
+  print(hla_allelesover0.01)
+  
+  for(allele in hla_allelesover0.01) {
+    
+    print(allele)
+    
+    temp = merge(data, hladata[,c("sample.id", "allele1", "allele2", "prob")], by.x = "FINNGENID", by.y = "sample.id")
+    temp$hla = ifelse(temp$allele1 == allele | temp$allele2 == allele, 1, 0)
+    temp$hla[temp$prob < 0.6] = NA
+    
+    for(endpoint in endpoints) {
+      
+      form = formula(paste0(endpoint, " ~ hla + SEX + BIRTH_YEAR + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10"))
+      # print(form)
+      fit = glm(form, data = temp, family = "binomial")
+      summary(fit)
+      
+      result = as.data.frame(t(matrix(c(endpoint, type, allele,
+                                        table(temp[,get(endpoint)])[[1]],
+                                        table(temp[,get(endpoint)])[[2]],
+                                        table(temp$hla)[[1]],
+                                        table(temp$hla)[[2]],
+                                        table(temp[,get(endpoint)], temp$hla)[2,2],
+                                        summary(fit)$coef[2,]))))
+      result_all = rbind(result_all, result)
+    }
+  }
+}
+
+dim(result_all)
+names(result_all) = c("endpoint", "type", "allele", "n_controls", "n_cases", "n_hla_noncarrier",
+                      "n_hla_carrier", "n_hla_carriers_cases", "beta", "se", "z", "p")
+
+setwd("path")
+write.xlsx(result_all, file = paste0("HLA_results.xlsx"), overwrite = T)
+
+
+
+
+
+########################################################################################################################
+
+
+#####################################################
+# IPW analyses                                      #
+#####################################################
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(ipw)
+library(Hmisc)
+
+
+
+dementia_data = fread(input = paste0("/path/FinnGen_IPW_dementia_long_analysis_file.txt")) 
+
+dementias = Cs(G6_AD_WIDE, F5_VASCDEM, G6_PARKINSON)
+
+result_all = c()
+
+for(dementia in dementias) {
+  
+  
+  medications_inc = Cs(methotrexate, salazines, NSAIDs, antihistamines, corticosteroids, TNF_a_inhib)
+  
+  
+  for(medication in medications_inc) {
+    
+    dementia_data = dementia_data %>% filter(paste0("prevalent_", medication)==0)
+    
+    dementia_data$medication = dementia_data[,medication]
+    
+    
+    temp <- ipwtm(
+      exposure = medication,
+      family = "survival",
+      numerator =   ~ SEX + baseline_age_1997 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10 ,
+      denominator = ~ SEX + baseline_age_1997 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10 +
+        statin + ACE_AT_renin_blockers + Ca_channel_blockers + diuretics + Insulin +  metformin + other_DM_drg +
+        depression_med + antipsychotic + anticoagulants +
+        + C3_CANCER_tv + I9_CHD_tv + I9_AF_tv + I9_HEARTFAIL_tv + I9_VTE_tv + I9_STR_EXH_tv + I9_ICH_tv + I9_SAH_tv +
+        E4_OBESITY_tv + G6_SLEEPAPNO_tv + F5_PSYCH_tv + COPD_EARLY_tv + COPD_LATER_tv,
+      id = FINNGENID,
+      tstart = tstart,
+      timevar = fuptime,
+      type = "first",
+      data = dementia_data)
+    
+    
+    dementia_results = coxph(Surv(tstart, fuptime, dementia_tv) ~ medication + cluster(FINNGENID),
+                             data = dementia_data, weights = temp$ipw.weights)
+    
+    
+    result <- as.data.frame(t(matrix(c(dementia,
+                                       medication,
+                                       dementia_results$n,
+                                       dementia_results$nevent,
+                                       summary(dementia_results)$coefficients[1,1],
+                                       summary(dementia_results)$coefficients[1,3],
+                                       summary(dementia_results)$coefficients[1,4],
+                                       summary(dementia_results)$coefficients[1,6],
+                                       exp(coefficients(dementia_results)[1]),
+                                       exp(coefficients(dementia_results)[1] - 1.96*summary(dementia_results)$coefficients[1,4]),
+                                       exp(coefficients(dementia_results)[1] + 1.96*summary(dementia_results)$coefficients[1,4]) ))))
+    
+    
+    
+    result_all <- rbind(result_all, result)
+    print(result_all)
+    
+    
+  }
+  
+}
+
+
+col_names <- c("dementia_type", "medication", "Ncohort", "Ncase",  "beta", "se", "robust_se", "pval", "hr", "ci_lower", "ci_upper")
+names(result_all) <- col_names
+
+write.xlsx(result_all, file = "Dementia_IPW_medication_results.xlsx", overwrite = T)
+
+
+
+
+
+
+
+
+
+
