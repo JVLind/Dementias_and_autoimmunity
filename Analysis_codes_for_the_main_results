@@ -4,6 +4,9 @@
 # Lindbohm et al 2022
 ########################################################################################################################
 
+##############################################
+# Part 1 MR analyses                         #
+##############################################
 
 ##############################################
 # MR analyses using MR-base                  #
@@ -32,7 +35,7 @@ library(MRInstruments)
 
 #####################################################################################
 
-#  Part 1 run analysis between dementia risk factors and immune system components  #
+#  Run analysis between dementia risk factors and immune system components  #
 
 ####################################################################################
 
@@ -151,7 +154,7 @@ write.xlsx(list_of_datasets, file = paste0("MR_results_immuno.xlsx"), overwrite 
 
 ########################################################################
 
-# Part 2 run analysis between dementia risk factors and BBB components #
+# Run analysis between dementia risk factors and BBB components #
 
 ########################################################################
 
@@ -302,9 +305,9 @@ write.xlsx(list_of_datasets, file = paste0("MR_results_BBB.xlsx"), overwrite = T
 
 ########################################################################################################################
 
-##############################################
-# Plasma proteomics analyses in Whitehall II #
-##############################################
+#####################################################
+# Part 3 Plasma proteomics analyses in Whitehall II #
+#####################################################
 
 
 library(data.table)
@@ -392,9 +395,9 @@ write.xlsx(res_age_sex_apoe, file = paste0("Age_sex_apoe_adj_results.xlsx"), ove
 
 
 
-###################################
-# PRS analyses                   #
-###################################
+#########################################
+# Part 4 PRS analyses                   #
+#########################################
 
 
 library(data.table)
@@ -471,9 +474,9 @@ write.xlsx(result_all, file = "FinnGen_PRS_results.xlsx", overwrite = T)
 
 
 
-###################################
-# HLA analyses                   #
-###################################
+#########################################
+# Part 5 HLA analyses                   #
+#########################################
 
 
 
@@ -574,9 +577,9 @@ write.xlsx(result_all, file = paste0("HLA_results.xlsx"), overwrite = T)
 ########################################################################################################################
 
 
-#####################################################
-# IPW analyses                                      #
-#####################################################
+############################################################
+# PArt 6 IPW analyses                                      #
+############################################################
 
 
 library(data.table)
