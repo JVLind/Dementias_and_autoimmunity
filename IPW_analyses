@@ -1,0 +1,94 @@
+########################################################################################################################
+
+
+############################################################
+# PArt 6 IPW analyses                                      #
+############################################################
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(ipw)
+library(Hmisc)
+
+
+
+dementia_data = fread(input = paste0("/path/FinnGen_IPW_dementia_long_analysis_file.txt")) 
+
+dementias = Cs(G6_AD_WIDE, F5_VASCDEM, G6_PARKINSON)
+
+result_all = c()
+
+for(dementia in dementias) {
+  
+  
+  medications_inc = Cs(methotrexate, salazines, NSAIDs, antihistamines, corticosteroids, TNF_a_inhib)
+  
+  
+  for(medication in medications_inc) {
+    
+    dementia_data = dementia_data %>% filter(paste0("prevalent_", medication)==0)
+    
+    dementia_data$medication = dementia_data[,medication]
+    
+    
+    temp <- ipwtm(
+      exposure = medication,
+      family = "survival",
+      numerator =   ~ SEX + baseline_age_1997 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10 ,
+      denominator = ~ SEX + baseline_age_1997 + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10 +
+        statin + ACE_AT_renin_blockers + Ca_channel_blockers + diuretics + Insulin +  metformin + other_DM_drg +
+        depression_med + antipsychotic + anticoagulants +
+        + C3_CANCER_tv + I9_CHD_tv + I9_AF_tv + I9_HEARTFAIL_tv + I9_VTE_tv + I9_STR_EXH_tv + I9_ICH_tv + I9_SAH_tv +
+        E4_OBESITY_tv + G6_SLEEPAPNO_tv + F5_PSYCH_tv + COPD_EARLY_tv + COPD_LATER_tv,
+      id = FINNGENID,
+      tstart = tstart,
+      timevar = fuptime,
+      type = "first",
+      data = dementia_data)
+    
+    
+    dementia_results = coxph(Surv(tstart, fuptime, dementia_tv) ~ medication + cluster(FINNGENID),
+                             data = dementia_data, weights = temp$ipw.weights)
+    
+    
+    result <- as.data.frame(t(matrix(c(dementia,
+                                       medication,
+                                       dementia_results$n,
+                                       dementia_results$nevent,
+                                       summary(dementia_results)$coefficients[1,1],
+                                       summary(dementia_results)$coefficients[1,3],
+                                       summary(dementia_results)$coefficients[1,4],
+                                       summary(dementia_results)$coefficients[1,6],
+                                       exp(coefficients(dementia_results)[1]),
+                                       exp(coefficients(dementia_results)[1] - 1.96*summary(dementia_results)$coefficients[1,4]),
+                                       exp(coefficients(dementia_results)[1] + 1.96*summary(dementia_results)$coefficients[1,4]) ))))
+    
+    
+    
+    result_all <- rbind(result_all, result)
+    print(result_all)
+    
+    
+  }
+  
+}
+
+
+col_names <- c("dementia_type", "medication", "Ncohort", "Ncase",  "beta", "se", "robust_se", "pval", "hr", "ci_lower", "ci_upper")
+names(result_all) <- col_names
+
+write.xlsx(result_all, file = "Dementia_IPW_medication_results.xlsx", overwrite = T)
+
+
