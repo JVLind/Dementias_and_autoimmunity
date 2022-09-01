@@ -1,0 +1,84 @@
+########################################################################################################################
+
+#####################################################
+# Part 3 Plasma proteomics analyses in Whitehall II #
+#####################################################
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(Hmisc)
+
+
+### Unadjusted model
+
+setwd("path")
+whii_dem_data = read.dta("Whitehall_II_dem_data.dta")
+
+
+id_list = read_excel(paste0("path/8_dementia_protein_ids.xlsx"))
+
+dem_seqid_list = id_list %>% pull(seq_id)
+
+res = matrix(NA, ncol = 5, nrow = length(seq_id))
+head(res);dim(res)
+res[,1] = seq_id
+res
+
+
+for(ii in 1:length(dem_seqid_list)) {
+  
+  res.cox = coxph(Surv(fu_dem_5_2019, inc_dem_5_2019) ~ age_s5+sex+get(res[ii,1])+soma_batch, data = whii_dem_data %>% select(soma_batch, age_s5, sex, fu_dem_5_2019, inc_dem_5_2019, c(dem_seqid_list)))
+  res[ii,2] = as.numeric(summary(res.cox)$coef[3,1])
+  res[ii,3] = summary(res.cox)$coef[3,2]
+  res[ii,4] = summary(res.cox)$coef[3,3]
+  res[ii,5] = summary(res.cox)$coef[3,5]
+  
+}
+
+res_age_sex = res
+res_age_sex = as.data.table(res_age_sex)
+names(res_age_sex) = c("var", "beta", "se", "teststat", "pval")
+res_age_sex
+
+setwd("path")
+write.xlsx(res_age_sex, file = paste0("Age_sex_adj_results.xlsx"), overwrite = T)
+
+
+
+### Adjusted model
+
+res = matrix(NA, ncol = 5, nrow = length(seq_id))
+head(res);dim(res)
+res[,1] = seq_id
+res
+
+for(ii in 1:length(dem_seqid_list)) {
+  
+  res.cox = coxph(Surv(fu_dem_5_2019, inc_dem_5_2019) ~ age_s5+sex+get(res[ii,1])+soma_batch+apoe_bin, data = whii_dem_data %>% select(soma_batch, age_s5, sex, fu_dem_5_2019, inc_dem_5_2019, c(dem_seqid_list)))
+  res[ii,2] = as.numeric(summary(res.cox)$coef[3,1])
+  res[ii,3] = summary(res.cox)$coef[3,2]
+  res[ii,4] = summary(res.cox)$coef[3,3]
+  res[ii,5] = summary(res.cox)$coef[3,5]
+  
+}
+
+res_age_sex_apoe = res
+res_age_sex_apoe = as.data.table(res_age_sex_apoe)
+names(res_age_sex_apoe) = c("var", "beta", "se", "teststat", "pval")
+res_age_sex_apoe
+
+write.xlsx(res_age_sex_apoe, file = paste0("Age_sex_apoe_adj_results.xlsx"), overwrite = T)
+
+
