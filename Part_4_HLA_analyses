@@ -1,0 +1,100 @@
+########################################################################################################################
+
+
+
+#########################################
+# Part 5 HLA analyses                   #
+#########################################
+
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(Hmisc)
+
+setwd("path")
+
+endpoints = read_xlsx("FinnGen_endpoint_data", col_names = F) %>% pull(1)
+data = fread(input = "FinnGen_data.zcat")
+cov = fread(input = "FinnGen_covariates.zcat")
+pc = fread("FinnGen_PC_data", select = c(2:12))
+data = data %>% left_join(cov) %>% left_join(pc)
+
+types = c("A", "B", "C", "DQA1", "DQB1", "DRB1", "DRB3", "DRB4", "DRB5", "DPB1")
+
+result_all = c()
+
+for(type in types) {
+  
+  print(paste0("Starting: HLA-", type))
+  
+  hladata = fread(paste0("R8_", type, "_imputed.tsv"))
+  alleles = unique(c(hladata$allele1, hladata$allele2)) 
+  alleles = alleles[nchar(alleles) == 5]
+  
+  hla_allelesover0.01 = c()
+  
+  for(allele in alleles) {
+    
+    temp = merge(data, hladata[,c("sample.id", "allele1", "allele2", "prob")], by.x = "FINNGENID", by.y = "sample.id")
+    temp$hla = ifelse(temp$allele1 == allele | temp$allele2 == allele, 1, 0)
+    temp$hla[temp$prob < 0.6] = NA
+    
+    if(prop.table(table(temp$hla))[2] >= 0.01 & prop.table(table(temp$hla))[1] != 1) {
+      hla_allelesover0.01 = c(hla_allelesover0.01, allele)
+    }
+    
+    rm(temp)
+    
+    hla_allelesover0.01 = hla_allelesover0.01[hla_allelesover0.01 != "ng"]
+    hla_allelesover0.01 = hla_allelesover0.01[!is.na(hla_allelesover0.01)]
+    
+  }
+  
+  print(hla_allelesover0.01)
+  
+  for(allele in hla_allelesover0.01) {
+    
+    print(allele)
+    
+    temp = merge(data, hladata[,c("sample.id", "allele1", "allele2", "prob")], by.x = "FINNGENID", by.y = "sample.id")
+    temp$hla = ifelse(temp$allele1 == allele | temp$allele2 == allele, 1, 0)
+    temp$hla[temp$prob < 0.6] = NA
+    
+    for(endpoint in endpoints) {
+      
+      form = formula(paste0(endpoint, " ~ hla + SEX + BIRTH_YEAR + PC1 + PC2 + PC3 + PC4 + PC5 + PC6 + PC7 + PC8 + PC9 + PC10"))
+      # print(form)
+      fit = glm(form, data = temp, family = "binomial")
+      summary(fit)
+      
+      result = as.data.frame(t(matrix(c(endpoint, type, allele,
+                                        table(temp[,get(endpoint)])[[1]],
+                                        table(temp[,get(endpoint)])[[2]],
+                                        table(temp$hla)[[1]],
+                                        table(temp$hla)[[2]],
+                                        table(temp[,get(endpoint)], temp$hla)[2,2],
+                                        summary(fit)$coef[2,]))))
+      result_all = rbind(result_all, result)
+    }
+  }
+}
+
+dim(result_all)
+names(result_all) = c("endpoint", "type", "allele", "n_controls", "n_cases", "n_hla_noncarrier",
+                      "n_hla_carrier", "n_hla_carriers_cases", "beta", "se", "z", "p")
+
+setwd("path")
+write.xlsx(result_all, file = paste0("HLA_results.xlsx"), overwrite = T)
+
