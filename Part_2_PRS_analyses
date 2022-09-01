@@ -1,0 +1,76 @@
+########################################################################################################################
+
+
+
+#########################################
+# Part 4 PRS analyses                   #
+#########################################
+
+
+library(data.table)
+library(dplyr)
+library(tidyr)
+library(survival)
+library(survminer)
+library(ggplot2)
+library(plyr)
+library(cluster)
+library(lubridate)
+library(stats)
+library(readxl)
+library(scales)
+library(tidyverse)
+library(Hmisc)
+
+
+data = fread(input = paste0("/path/FinnGen_PRS_analysis_file.txt")) 
+
+sex_outcomes = fread(input = paste0("/path/FinnGen_sex_specific_outcomes.txt"))  
+
+all_outcomes = fread(input = paste0("/path/FinnGen_outcomes.txt"))  
+
+
+results_all = c()
+
+for(disease in all_outcomes)  {
+  
+  data$endpoint = data[,get(disease)]
+  
+  if(disease %in% c(sex_outcomes)) {
+    paste0("")
+  } else {
+    data$endpoint[is.na(data$endpoint)] = 0
+  }
+  
+  if(disease %in% sex_outcomes) {
+    form = formula(paste0("endpoint ~ prs_z + ", covs))
+  } else {
+    form = formula(paste0("endpoint ~ prs_z + SEX + ", covs))
+  }
+  
+  form = formula(paste0("endpoint ~ prs_z +", covs))
+  fit = glm(form, data = data, family = "binomial")
+  summary(fit)
+  
+  result <- as.data.frame(t(matrix(c(disease,
+                                     summary(fit)$coefficients[2,1],
+                                     summary(fit)$coefficients[2,2],
+                                     summary(fit)$coefficients[2,3],
+                                     summary(fit)$coefficients[2,4],
+                                     exp(coefficients(fit)[2]),
+                                     exp(coefficients(fit)[2] - 1.96*summary(fit)$coefficients[2,2]),
+                                     exp(coefficients(fit)[2] + 1.96*summary(fit)$coefficients[2,2]) ))))
+  
+  results_all = rbind(results_all, result)
+  print(results_all)
+  
+  data$endpoint = NULL
+  
+}
+
+
+col_names <- c("disease", "beta", "se", "z",  "pval", "or", "ci_lower", "ci_upper")
+names(result_all) <- col_names
+
+write.xlsx(result_all, file = "FinnGen_PRS_results.xlsx", overwrite = T)
+
